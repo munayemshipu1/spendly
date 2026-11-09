@@ -22,7 +22,9 @@
   --radius-sm: 14px;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --kb: 0px;
+  /* visible area (shrinks when the on-screen keyboard is open), kept in sync from JS */
+  --vvh: 100dvh;
+  --vvtop: 0px;
   color-scheme: light;
 }
 
@@ -216,18 +218,21 @@ button.row:active, a.row:active { background: var(--surface-2); }
 .text-btn:active { background: var(--surface-2); }
 
 /* ───────────── Overlays ───────────── */
-.ov { position: fixed; inset: 0; z-index: 50; }
+/* Overlays cover exactly the visible area, so sheets and dialogs sit above the iPhone keyboard. */
+.ov { position: fixed; left: 0; right: 0; top: var(--vvtop); height: var(--vvh); z-index: 50; }
 .ov-backdrop { position: absolute; inset: 0; background: var(--scrim); opacity: 0; transition: opacity .25s; }
 .ov.open .ov-backdrop { opacity: 1; }
 .ov-panel { position: absolute; }
 
 /* bottom sheet */
 .ov-panel.sheet {
-  left: 0; right: 0; bottom: var(--kb); margin: 0 auto; max-width: 520px;
-  max-height: calc(100dvh - var(--kb) - var(--safe-top) - 24px); overflow-y: auto; overscroll-behavior: contain;
+  left: 0; right: 0; bottom: 0; margin: 0 auto; max-width: 520px;
+  max-height: calc(var(--vvh) - var(--safe-top) - 12px); overflow-y: auto; overscroll-behavior: contain;
   background: var(--bg); border-radius: 28px 28px 0 0; padding: 0 20px calc(var(--safe-bottom) + 18px);
-  transform: translateY(100%); transition: transform .32s cubic-bezier(.2, .9, .25, 1), bottom .2s;
+  transform: translateY(100%); transition: transform .32s cubic-bezier(.2, .9, .25, 1);
 }
+/* With the keyboard up, the home-indicator padding is not needed */
+.kb-open .ov-panel.sheet { padding-bottom: 14px; }
 .ov.open .ov-panel.sheet { transform: translateY(0); }
 .sheet-top { position: sticky; top: 0; z-index: 2; background: var(--bg); margin: 0 -20px; padding: 0 20px 4px; }
 .grab-zone { padding: 10px 0 6px; touch-action: none; cursor: grab; }
@@ -272,11 +277,11 @@ button.row:active, a.row:active { background: var(--surface-2); }
 
 /* centered dialog */
 .ov-panel.dialog {
-  left: 50%; top: 50%; width: min(calc(100% - 32px), 420px); max-height: calc(100dvh - var(--kb) - 40px); overflow-y: auto;
+  left: 50%; top: 50%; width: min(calc(100% - 32px), 420px); max-height: calc(var(--vvh) - var(--safe-top) - 24px); overflow-y: auto;
   background: var(--bg); border-radius: 28px; padding: 22px 22px 14px; box-shadow: var(--shadow-lg);
-  transform: translate(-50%, calc(-50% - var(--kb) / 2)) scale(.94); opacity: 0; transition: transform .22s cubic-bezier(.2, .9, .25, 1), opacity .18s;
+  transform: translate(-50%, -50%) scale(.94); opacity: 0; transition: transform .22s cubic-bezier(.2, .9, .25, 1), opacity .18s;
 }
-.ov.open .ov-panel.dialog { transform: translate(-50%, calc(-50% - var(--kb) / 2)); opacity: 1; }
+.ov.open .ov-panel.dialog { transform: translate(-50%, -50%); opacity: 1; }
 .dlg-head { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
 .dlg-head h2 { font-size: 22px; font-weight: 800; }
 .dlg-head .sub { font-size: 13px; color: var(--text-2); }

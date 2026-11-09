@@ -1394,15 +1394,20 @@ function applyTheme() {
 }
 darkMq.addEventListener?.('change', applyTheme);
 
-// Keep sheets/dialogs above the on-screen keyboard (iOS doesn't resize the layout viewport).
+// Keep sheets/dialogs inside the part of the screen you can actually see. When the iPhone
+// keyboard opens, iOS shrinks *and slides* the visible area without resizing the page,
+// so overlays track window.visualViewport's height and offset instead of the full screen.
 if (window.visualViewport) {
   const vv = window.visualViewport;
+  const root = document.documentElement;
   const update = () => {
-    const kb = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
-    document.documentElement.style.setProperty('--kb', (kb > 60 ? kb : 0) + 'px');
+    root.style.setProperty('--vvh', `${Math.round(vv.height)}px`);
+    root.style.setProperty('--vvtop', `${Math.round(vv.offsetTop)}px`);
+    root.classList.toggle('kb-open', window.innerHeight - vv.height > 120);
   };
   vv.addEventListener('resize', update);
   vv.addEventListener('scroll', update);
+  update();
 }
 
 // Installed iPhone apps have no browser back gesture, so swipe in from the left edge to go back.
