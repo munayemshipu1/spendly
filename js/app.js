@@ -3,7 +3,7 @@ import * as S from './store.js';
 import {
   todayKey, addDays, monthName, monthShort, monthLabel, shortDay, dayLabel, dayMonth,
   PERIODS, periodOf, periodRange, periodStep, weekLabel, rangeLabel, customKey, daysBetween,
-  esc, uid, sanitizeAmount, parseAmount, pad, monthOf, addMonths,
+  esc, uid, sanitizeAmount, parseAmount, pad, monthOf, addMonths, weekdayShort, daysInMonth,
 } from './util.js';
 
 /* ═════════════ State ═════════════ */
@@ -251,6 +251,7 @@ const VIEWS = {
     const day = state.tx.filter((t) => t.date === ui.date).sort(sortTx);
     const isToday = ui.date === todayKey();
     const collapse = items.length > 6 && !ui.allCats;
+    homeChart = { groups: periodBuckets(period, key), def: savedLine(T, phrase) };
 
     const html = `
       <header class="topbar">
@@ -274,6 +275,13 @@ const VIEWS = {
         <span><span class="k"><i class="dot expense"></i>Expense</span><strong class="num">${money(T.expense)}</strong></span>
         <span><span class="k"><i class="dot balance"></i>Balance</span><strong class="num ${T.net < 0 ? 'neg' : ''}">${money(T.net)}</strong></span>
       </button>
+
+      <section class="card trend" style="margin-top:12px">
+        <div class="trend-head"><h2>Income vs expenses</h2>
+          <div class="legend"><span><i class="dot income"></i>Income</span><span><i class="dot expense"></i>Expense</span></div></div>
+        <div class="chart-readout" id="chart-readout">${homeChart.def}</div>
+        ${barChart(homeChart.groups, { action: 'chart-pick', aria: `Income and expenses ${phrase}` })}
+      </section>
 
       <section class="card" style="margin-top:12px">
         <div class="card-head"><h2>By category</h2>
@@ -513,25 +521,109 @@ function historyResults(p) {
     ${list.length > shown.length ? `<button class="btn soft block" style="margin-top:14px" data-action="hist-more">Show more</button>` : ''}`;
 }
 
-function trendChart(period, endKey, per, selKey) {
-  const ms = Array.from({ length: 6 }, (_, i) => periodStep(period, endKey, i - 5));
-  const vals = ms.map((m) => per.get(m) || { income: 0, expense: 0 });
-  const label = (k) => (period === 'week' ? dayMonth(k) : period === 'month' ? monthShort(k) : k);
-  const max = Math.max(1, ...vals.flatMap((v) => [v.income, v.expense]));
-  const W = 320, H = 150, T = 6, B = 22, ch = H - T - B, cw = W / 6, bw = 13;
-  let s = `<line class="grid" x1="0" x2="${W}" y1="${T + ch + 0.5}" y2="${T + ch + 0.5}"/>`;
-  ms.forEach((m, i) => {
+/** Grouped income/expense bar chart. groups: [{ key, label, income, expense }] */
+function barChart(groups, { action, sel = null, aria }) {
+  const n = groups.length;
+  const max = Math.max(...groups.flatMap((g) => [g.income, g.expense]), 0);
+  const W = 320, H = 150, T = 16, B = 22, ch = H - T - B, cw = W / n;
+  const bw = Math.max(3, Math.min(13, cw * 0.34));
+  const gap = Math.min(1.5, bw * 0.15);
+  const small = n > 8;
+  // Thin out labels that would overlap (e.g. 13 weekly "12 Aug" labels)
+  const charW = small ? 5.4 : 6.2;
+  const longest = Math.max(...groups.map((g) => g.label.length));
+  const every = Math.max(1, Math.ceil((longest * charW) / (cw * 0.92)));
+  let s =`<line class="grid" x1="0" x2="${W}" y1="${T + ch + 0.5}" y2="${T + ch + 0.5}"/>`;
+  if (max > 0) {
+    const compact = new Intl.NumberFormat('en-GB', { notation: 'compact', maximumFractionDigits: 1 }).format(max);
+    s += `<line class="grid dash" x1="0" x2="${W}" y1="${T + 0.5}" y2="${T + 0.5}"/>
+      <text class="axis" x="${W}" y="${T - 4}" text-anchor="end">${esc(state.currency)}${compact}</text>`;
+  }
+  groups.forEach((g, i) => {
     const cx = i * cw + cw / 2;
-    const hi = (vals[i].income / max) * ch, he = (vals[i].expense / max) * ch;
-    const bar = (x, h, col) => (h > 0
-      ? `<rect x="${x.toFixed(1)}" y="${(T + ch - Math.max(h, 2)).toFixed(1)}" width="${bw}" height="${Math.max(h, 2).toFixed(1)}" rx="3.5" style="fill:${col}"/>` : '');
-    s += `<g class="col" data-action="stats-goto" data-key="${m}">
-      <rect x="${i * cw}" y="0" width="${cw}" height="${H}" fill="transparent"/>
-      ${bar(cx - bw - 1.5, hi, 'var(--income)')}${bar(cx + 1.5, he, 'var(--expense)')}
-      <text x="${cx}" y="${H - 5}" text-anchor="middle" class="${m === selKey ? 'on' : ''}">${label(m)}</text></g>`;
+    const scale = max > 0 ? ch / max : 0;
+    const bar = (x, v, col) => (v > 0
+      ? `<rect x="${x.toFixed(1)}" y="${(T + ch - Math.max(v * scale, 2)).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(v * scale, 2).toFixed(1)}" rx="${Math.min(3.5, bw / 2).toFixed(1)}" style="fill:${col}"/>` : '');
+    s += `<g class="col ${g.key === sel ? 'on' : ''}" data-action="${action}" data-key="${g.key}" data-i="${i}">
+      <rect class="hit" x="${(i * cw).toFixed(1)}" y="0" width="${cw.toFixed(1)}" height="${H}" fill="transparent"/>
+      ${bar(cx - bw - gap, g.income, 'var(--income)')}${bar(cx + gap, g.expense, 'var(--expense)')}
+      ${i % every === 0 || g.key === sel ? `<text x="${cx.toFixed(1)}" y="${H - 5}" text-anchor="middle" class="${small ? 'small' : ''}">${esc(g.label)}</text>` : ''}</g>`;
   });
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Income and expenses over the last six ${period === 'all' ? 'year' : period}s">${s}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">${s}</svg>`;
 }
+
+/** Statistics: the 6 periods ending at endKey */
+function trendChart(period, endKey, per, selKey) {
+  const label = (k) => (period === 'week' ? dayMonth(k) : period === 'month' ? monthShort(k) : k);
+  const groups = Array.from({ length: 6 }, (_, i) => {
+    const k = periodStep(period, endKey, i - 5);
+    const v = per.get(k) || { income: 0, expense: 0 };
+    return { key: k, label: label(k), income: v.income, expense: v.expense };
+  });
+  return barChart(groups, { action: 'stats-goto', sel: selKey, aria: `Income and expenses over the last six ${period === 'all' ? 'year' : period}s` });
+}
+
+/** Home: the selected period split into days / weeks / months / years. */
+function periodBuckets(period, key) {
+  const [a, b] = periodRange(period, key);
+  const out = [];
+  const add = (from, to, label, title) => out.push({ key: from, from, to, label, title, income: 0, expense: 0 });
+  const byDays = (from, to) => {
+    for (let d = from; d <= to; d = addDays(d, 1)) add(d, d, period === 'week' ? weekdayShort(d) : String(Number(d.slice(8))), shortDay(d));
+  };
+  const byWeeks = (from, to) => {
+    for (let d = from; d <= to; d = addDays(d, 7)) {
+      const e = addDays(d, 6) < to ? addDays(d, 6) : to;
+      add(d, e, dayMonth(d), rangeLabel(d, e));
+    }
+  };
+  const byMonths = (from, to) => {
+    for (let mk = monthOf(from); mk <= monthOf(to); mk = addMonths(mk, 1)) {
+      const s = `${mk}-01` < from ? from : `${mk}-01`;
+      const e = `${mk}-${pad(daysInMonth(mk))}` > to ? to : `${mk}-${pad(daysInMonth(mk))}`;
+      add(s, e, monthShort(mk), monthLabel(mk));
+    }
+  };
+  const byYears = (fromY, toY) => {
+    for (let y = fromY; y <= toY; y++) add(`${y}-01-01`, `${y}-12-31`, String(y), String(y));
+  };
+
+  if (period === 'week') byDays(a, b);
+  else if (period === 'month') {
+    // 1–7, 8–14, 15–21, 22–28, 29–end
+    const last = daysInMonth(key);
+    for (let s = 1; s <= last; s += 7) {
+      const e = Math.min(s + 6, last);
+      add(`${key}-${pad(s)}`, `${key}-${pad(e)}`, `${s}–${e}`, rangeLabel(`${key}-${pad(s)}`, `${key}-${pad(e)}`));
+    }
+  } else if (period === 'year') byMonths(a, b);
+  else if (period === 'all') {
+    const now = Number(todayKey().slice(0, 4));
+    const first = state.tx.reduce((m, t) => Math.min(m, Number(t.date.slice(0, 4))), now);
+    byYears(Math.max(first, now - 7), now);
+  } else {
+    const n = daysBetween(a, b) + 1;
+    if (n <= 14) byDays(a, b);
+    else if (n <= 98) byWeeks(a, b);
+    else if (n <= 731) byMonths(a, b);
+    else byYears(Number(a.slice(0, 4)), Number(b.slice(0, 4)));
+  }
+  for (const t of inPeriod(period, key)) {
+    const g = out.find((x) => t.date >= x.from && t.date <= x.to);
+    if (g) g[t.type] += t.amount;
+  }
+  out.forEach((g) => { g.income = round2(g.income); g.expense = round2(g.expense); });
+  return out;
+}
+
+/** Summary line above the home chart */
+function savedLine(T, phrase) {
+  if (!T.income && !T.expense) return `No entries ${phrase} yet`;
+  if (!T.income) return `<b>Spent ${money(T.expense)}</b> · no income ${phrase}`;
+  if (T.net >= 0) return `<b class="pos">Saved ${money(T.net)}</b> · ${pct(T.net, T.income)}% of income`;
+  return `<b class="neg">Spent ${money(-T.net)} more</b> than came in`;
+}
+let homeChart = null; // { groups, def } for the tap-a-bar readout
 
 /* ═════════════ Rendering & navigation ═════════════ */
 function render(dir) {
@@ -591,6 +683,16 @@ const actions = {
   },
   today: () => { ui.date = todayKey(); render(); window.scrollTo({ top: 0, behavior: 'smooth' }); },
   'home-type': (el) => { ui.homeType = el.dataset.v; render(); },
+  'chart-pick': (el) => {
+    const g = homeChart?.groups[Number(el.dataset.i)];
+    if (!g) return;
+    const wasOn = el.classList.contains('on');
+    viewEl.querySelectorAll('.col.on').forEach((x) => x.classList.remove('on'));
+    const out = $('#chart-readout');
+    if (wasOn) { out.innerHTML = homeChart.def; return; } // tap the same bar again to go back to the summary
+    el.classList.add('on');
+    out.innerHTML = `<b>${esc(g.title)}</b> · <span class="pos">In ${money(g.income)}</span> · <span class="out">Out ${money(g.expense)}</span>`;
+  },
   'toggle-cats': () => { ui.allCats = !ui.allCats; render(); },
   'home-period': (el) => {
     if (el.dataset.v === 'custom') {

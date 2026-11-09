@@ -50,6 +50,14 @@ export const dayLabel = (k) => {
   return shortDay(k);
 };
 
+/** "Mon" */
+export const weekdayShort = (k) => DOW[fromKey(k).getDay()];
+
+export const daysInMonth = (mk) => {
+  const [y, m] = mk.split('-').map(Number);
+  return new Date(y, m, 0).getDate();
+};
+
 /** "9 Nov" */
 export const dayMonth = (k) => {
   const d = fromKey(k);

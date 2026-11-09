@@ -9,7 +9,8 @@ and keeps all data on the device. No accounts, no server, no build step.
 
 - **Quick entry:** amount, category and Save. You can switch between expense and income inside the panel,
   add an optional note, pick a date, and Undo after saving, editing or deleting.
-- **Home:** overview for the selected period, a spending/income donut chart by category, and the
+- **Home:** overview for the selected period, an income vs expenses bar chart (tap a bar for details),
+  a spending/income donut chart by category, and the
   entries for the selected day. The bottom bar (Income · Today/Home · Expenses) is on every screen.
 - **Periods:** Week, Month, Year, All time or a custom date range (with shortcuts like "Last 30 days").
   These are available on the home screen, Statistics and category pages.
