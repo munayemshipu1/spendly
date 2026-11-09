@@ -1,5 +1,7 @@
 # Spendly: personal money tracker
 
+**Live app:** https://munayemshipu1.github.io/spendly/
+
 An installable web app (PWA). It runs full-screen from your iPhone home screen, works offline,
 and keeps all data on the device. No accounts, no server, no build step.
 
