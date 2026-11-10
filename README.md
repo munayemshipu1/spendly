@@ -18,6 +18,8 @@ and keeps all data on the device. No accounts, no server, no build step.
 - **Recurring payments:** rent, insurance, bills, subscriptions or salary are added automatically on their day
   each month. Missed months are filled in the next time the app opens, and you can pause, resume or edit each one.
   Set one up from Menu → Recurring payments, or turn on "Repeat every month" when adding an entry.
+- **Money owed:** keep track of money you lent (or borrowed) — who, how much, due date, partial repayments.
+  Overdue items are highlighted, the home screen shows what you're owed, and you get a reminder once a day.
 - **Categories:** your own names, icons or emoji, and colours. Drag to reorder.
 - **Search** all transactions; **export** to CSV; **back up / restore** to a JSON file.
 - £ by default, with other currency symbols available, plus light, dark or system theme.

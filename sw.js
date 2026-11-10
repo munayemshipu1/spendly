@@ -1,6 +1,6 @@
 // Offline support: serve the app shell from cache, refresh it in the background.
 // Bump VERSION whenever you change any file so phones pick up the update.
-const VERSION = 'spendly-v3';
+const VERSION = 'spendly-v4';
 const ASSETS = [
   './', './index.html', './manifest.webmanifest', './css/app.css',
   './js/app.js', './js/store.js', './js/util.js', './js/icons.js',

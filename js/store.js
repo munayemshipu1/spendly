@@ -44,6 +44,9 @@ function defaults() {
     // Monthly repeating entries: { id, type, amount, catId, note, start: 'YYYY-MM-DD',
     //   day: 1-31, lastPosted: 'YYYY-MM' | null, paused: bool, createdAt }
     recurring: [],
+    // Money lent / borrowed: { id, dir: 'lent'|'borrowed', person, amount, date: 'YYYY-MM-DD',
+    //   due: 'YYYY-MM-DD'|null, note, repaid: [{ id, amount, date }], settled: 'YYYY-MM-DD'|null, createdAt }
+    loans: [],
   };
 }
 
@@ -55,6 +58,17 @@ function normalize(s) {
   if (!Array.isArray(out.recurring)) out.recurring = [];
   out.recurring = out.recurring.filter((r) => r && Number(r.amount) > 0 && /^\d{4}-\d{2}-\d{2}$/.test(r.start))
     .map((r) => ({ ...r, amount: Number(r.amount), day: Number(r.day) || Number(r.start.slice(8)) }));
+  if (!Array.isArray(out.loans)) out.loans = [];
+  out.loans = out.loans.filter((l) => l && Number(l.amount) > 0 && /^\d{4}-\d{2}-\d{2}$/.test(l.date))
+    .map((l) => ({
+      ...l,
+      dir: l.dir === 'borrowed' ? 'borrowed' : 'lent',
+      person: String(l.person || 'Someone'),
+      amount: Number(l.amount),
+      due: l.due || null,
+      settled: l.settled || null,
+      repaid: (Array.isArray(l.repaid) ? l.repaid : []).filter((r) => Number(r.amount) > 0).map((r) => ({ ...r, amount: Number(r.amount) })),
+    }));
   out.tx = out.tx.filter((t) => t && /^\d{4}-\d{2}-\d{2}$/.test(t.date) && Number(t.amount) > 0)
     .map((t) => ({ ...t, amount: Number(t.amount), type: t.type === 'income' ? 'income' : 'expense' }));
   return out;

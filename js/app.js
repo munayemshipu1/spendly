@@ -164,6 +164,88 @@ function announceAdded(added) {
   toast(`Added ${added.length} recurring ${added.length === 1 ? 'entry' : 'entries'}: ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}`);
 }
 
+/* ═════════════ Money owed (lent / borrowed) ═════════════ */
+const loanPaid = (l) => round2(l.repaid.reduce((s, r) => s + r.amount, 0));
+const loanLeft = (l) => Math.max(0, round2(l.amount - loanPaid(l)));
+const loanOpen = (l) => !l.settled && loanLeft(l) > 0;
+const fmtAmt = (n) => (Number.isInteger(n) ? String(n) : n.toFixed(2));
+
+/** Due-date status for an open loan, or null */
+function dueInfo(l) {
+  if (!l.due || !loanOpen(l)) return null;
+  const n = daysBetween(todayKey(), l.due);
+  if (n < 0) return { cls: 'overdue', text: `Overdue by ${-n} ${n === -1 ? 'day' : 'days'}` };
+  if (n === 0) return { cls: 'soon', text: 'Due today' };
+  if (n === 1) return { cls: 'soon', text: 'Due tomorrow' };
+  return { cls: n <= 7 ? 'soon' : '', text: `Due ${dayMonth(l.due)} · in ${n} days` };
+}
+
+const AVATAR_COLORS = ['#FF5A1F', '#2F7FE8', '#1FA67A', '#7C5CFF', '#D946A8', '#10A5C0', '#E5484D', '#C2410C', '#9A4A26', '#F2B705'];
+function avatar(name, cls = '') {
+  const key = name.trim().toLowerCase();
+  const h = [...key].reduce((a, c) => (a * 31 + c.charCodeAt(0)) >>> 0, 7);
+  const initials = name.trim().split(/\s+/).slice(0, 2).map((w) => [...w][0] || '').join('').toUpperCase() || '?';
+  return `<span class="avatar ${cls}" style="--c:${AVATAR_COLORS[h % AVATAR_COLORS.length]}" aria-hidden="true">${esc(initials)}</span>`;
+}
+
+/** Soonest due first (overdue on top), then undated by newest */
+const loanSort = (a, b) => (a.due || '9999').localeCompare(b.due || '9999') || b.date.localeCompare(a.date);
+
+function owedTotals(dir) {
+  const open = state.loans.filter((l) => l.dir === dir && loanOpen(l));
+  return {
+    count: open.length,
+    total: round2(open.reduce((s, l) => s + loanLeft(l), 0)),
+    people: new Set(open.map((l) => l.person.trim().toLowerCase())).size,
+    overdue: open.filter((l) => dueInfo(l)?.cls === 'overdue').length,
+  };
+}
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+function loanRow(l) {
+  const left = loanLeft(l), open = loanOpen(l), di = dueInfo(l);
+  const status = !open ? `Paid back${l.settled ? ' ' + dayMonth(l.settled) : ''}`
+    : di ? `<span class="due ${di.cls}">${di.text}</span>`
+      : `${l.dir === 'lent' ? 'Lent' : 'Borrowed'} ${l.date === todayKey() ? 'today' : shortDay(l.date)}`;
+  return `<button class="row ${open ? '' : 'paused'}" data-action="open-loan" data-id="${l.id}">
+    ${avatar(l.person)}
+    <span class="main"><span class="title" style="display:block">${esc(l.person)}</span>
+      <span class="sub" style="display:block">${status}${l.note ? ` · ${esc(l.note)}` : ''}</span></span>
+    <span class="amt-col"><span class="amt num">${money(open ? left : l.amount)}</span>
+      ${open && left < l.amount ? `<span class="of num">of ${money(l.amount)}</span>` : ''}</span>
+  </button>`;
+}
+
+/** Reminder card on the home screen (only when something is outstanding) */
+function owedCard() {
+  const L = owedTotals('lent'), B = owedTotals('borrowed');
+  if (!L.count && !B.count) return '';
+  const main = L.count ? L : B;
+  const dir = L.count ? 'lent' : 'borrowed';
+  const title = L.count ? `${money(L.total)} owed to you` : `You owe ${money(B.total)}`;
+  const bits = [plural(main.people, 'person', 'people')];
+  if (main.overdue) bits.push(`<span class="due overdue">${main.overdue} overdue</span>`);
+  if (L.count && B.count) bits.push(`you owe ${money(B.total)}`);
+  return `<button class="card owed-card" data-action="go-loans" data-dir="${dir}">
+    <span class="chip" style="--c:var(--accent)">${ic('handshake')}</span>
+    <span class="main"><span class="title">${title}</span><span class="sub">${bits.join(' · ')}</span></span>
+    ${ic('chevron_right', 'chev')}</button>`;
+}
+
+/** Once a day, remind about money that's due or overdue */
+function remindDue() {
+  const t = todayKey();
+  try { if (localStorage.getItem('spendly.remindedOn') === t) return; } catch { /* ignore */ }
+  const due = state.loans.filter((l) => { const d = dueInfo(l); return d && (d.cls === 'overdue' || d.text === 'Due today'); });
+  if (!due.length) return;
+  try { localStorage.setItem('spendly.remindedOn', t); } catch { /* ignore */ }
+  const first = due.sort(loanSort)[0];
+  const msg = due.length === 1
+    ? `${first.dir === 'lent' ? `${first.person} owes you` : `You owe ${first.person}`} ${money(loanLeft(first))} — ${dueInfo(first).text.toLowerCase()}`
+    : `${due.length} loans are due or overdue`;
+  toast(msg, { action: 'View', onAction: () => go('loans', { dir: first.dir, showPaid: false }) });
+}
+
 /* ═════════════ UI building blocks ═════════════ */
 function chip(cat, cls = '') {
   const style = `style="--c:${colorVar(cat.color)}"`;
@@ -275,6 +357,8 @@ const VIEWS = {
         <span><span class="k"><i class="dot expense"></i>Expense</span><strong class="num">${money(T.expense)}</strong></span>
         <span><span class="k"><i class="dot balance"></i>Balance</span><strong class="num ${T.net < 0 ? 'neg' : ''}">${money(T.net)}</strong></span>
       </button>
+
+      ${owedCard()}
 
       <section class="card trend" style="margin-top:12px">
         <div class="trend-head"><h2>Income vs expenses</h2>
@@ -471,6 +555,34 @@ const VIEWS = {
     return { html };
   },
 
+  loans(p) {
+    const dir = p.dir;
+    const T = owedTotals(dir);
+    const mine = state.loans.filter((l) => l.dir === dir);
+    const open = mine.filter(loanOpen).sort(loanSort);
+    const done = mine.filter((l) => !loanOpen(l)).sort((a, b) => (b.settled || b.date).localeCompare(a.settled || a.date));
+    const lent = dir === 'lent';
+    const html = `
+      ${appbar('Money owed', `<button class="icon-btn ghost" data-action="new-loan" data-dir="${dir}" aria-label="Add">${ic('add')}</button>`)}
+      ${tabs([['lent', 'Owed to me'], ['borrowed', 'I owe']], dir, 'loans-dir')}
+      <p class="note" style="padding:12px 6px 8px">${lent ? "Money people have borrowed from you. It doesn't count as spending." : "Money you've borrowed from others. It doesn't count as income."}</p>
+      ${open.length ? `
+        <div class="card overview">
+          <span><span class="k"><i class="dot ${lent ? 'income' : 'expense'}"></i>${lent ? 'Owed to you' : 'You owe'}</span><strong class="num">${money(T.total)}</strong></span>
+          <span><span class="k"><i class="dot balance"></i>People</span><strong class="num">${T.people}</strong></span>
+          <span><span class="k"><i class="dot" style="--c:var(--danger)"></i>Overdue</span><strong class="num ${T.overdue ? 'neg' : ''}">${T.overdue}</strong></span>
+        </div>
+        <div class="card" style="margin-top:12px"><div class="rows">${open.map(loanRow).join('')}</div></div>`
+      : `<div class="card"><div class="empty">${ic('handshake')}${lent ? 'Nobody owes you money right now.' : "You don't owe anyone right now."}<br>
+          Add it here when you ${lent ? 'lend someone money' : 'borrow money'}, so you don't forget.</div></div>`}
+      ${done.length ? `
+        <div class="section-row"><span class="section-label">Paid back (${done.length})</span>
+          <button class="link" data-action="toggle-paid">${p.showPaid ? 'Hide' : 'Show'}</button></div>
+        ${p.showPaid ? `<div class="card"><div class="rows">${done.map(loanRow).join('')}</div></div>` : ''}` : ''}
+      <button class="btn soft block" style="margin-top:14px" data-action="new-loan" data-dir="${dir}">${ic('add')}${lent ? 'Add money I lent' : 'Add money I borrowed'}</button>`;
+    return { html };
+  },
+
   settings() {
     const CURS = ['£', '$', '€', '৳', '₹', '¥', '₦', 'Tk'];
     const custom = CURS.includes(state.currency) ? '' : state.currency;
@@ -493,7 +605,7 @@ const VIEWS = {
         <button class="set-row" data-action="import">${ic('file_upload')}<span class="main"><span class="title" style="display:block">Restore from backup</span><span class="sub" style="display:block">Replaces what's on this device</span></span></button>
         <button class="set-row" data-action="export-csv">${ic('table_view')}<span class="main"><span class="title" style="display:block">Export spreadsheet</span><span class="sub" style="display:block">CSV for Excel, Numbers or Sheets</span></span></button>
         ${state.tx.length ? '' : `<button class="set-row" data-action="sample">${ic('auto_awesome')}<span class="main"><span class="title" style="display:block">Load sample data</span><span class="sub" style="display:block">Try the app with 3 months of example entries</span></span></button>`}
-        <button class="set-row danger" data-action="erase">${ic('delete_forever')}<span class="main"><span class="title" style="display:block">Erase all data</span><span class="sub" style="display:block;color:var(--text-2)">Entries, recurring payments and custom categories</span></span></button>
+        <button class="set-row danger" data-action="erase">${ic('delete_forever')}<span class="main"><span class="title" style="display:block">Erase all data</span><span class="sub" style="display:block;color:var(--text-2)">Entries, recurring payments, money owed and custom categories</span></span></button>
       </div></div>
       <p class="note">${ic('lock', 'inline-ic')} ${state.tx.length} entries stored privately on this device — nothing is uploaded anywhere.
         Back up now and then, especially before clearing Safari data or switching phones.<br><br>
@@ -745,6 +857,11 @@ const actions = {
   'hist-filter': (el) => { top().filter = el.dataset.v; top().limit = 300; render(); },
   'hist-more': () => { top().limit += 300; $('#hist-results').innerHTML = historyResults(top()); },
   'cats-type': (el) => { top().type = el.dataset.v; render(); },
+  'go-loans': (el) => go('loans', { dir: el.dataset.dir || 'lent', showPaid: false }),
+  'loans-dir': (el) => { top().dir = el.dataset.v; render(); },
+  'new-loan': (el) => openLoanForm({ dir: el.dataset.dir || 'lent' }),
+  'open-loan': (el) => { const l = state.loans.find((x) => x.id === el.dataset.id); if (l) openLoanDetail(l); },
+  'toggle-paid': () => { top().showPaid = !top().showPaid; render(); },
   'edit-rec': (el) => { const r = state.recurring.find((x) => x.id === el.dataset.id); if (r) openTxSheet({ rec: r }); },
   'new-rec': () => openTxSheet({ rec: 'new', type: 'expense' }),
   'edit-cat': (el) => { const c = catById(el.dataset.id); if (c) openCatDialog({ cat: c }); },
@@ -764,7 +881,7 @@ const actions = {
   erase: async () => {
     const ok = await confirmDialog({
       title: 'Erase all data?',
-      message: `This permanently removes ${state.tx.length} entries and ${state.recurring.length} recurring payments, and resets your categories. Your currency and theme are kept. Consider backing up first.`,
+      message: `This permanently removes ${state.tx.length} entries, ${state.recurring.length} recurring payments and ${state.loans.length} money-owed records, and resets your categories. Your currency and theme are kept. Consider backing up first.`,
       confirm: 'Erase', danger: true,
     });
     if (!ok) return;
@@ -933,6 +1050,7 @@ function openMenu() {
     ['stats', 'bar_chart', 'Statistics'],
     ['history', 'history', 'All transactions'],
     ['recurring', 'autorenew', 'Recurring payments'],
+    ['loans', 'handshake', 'Money owed'],
     ['categories', 'category', 'Categories'],
     ['settings', 'settings', 'Settings'],
   ];
@@ -946,6 +1064,7 @@ function openMenu() {
     else if (k === 'history') go('history', { q: '', filter: 'all', limit: 300 });
     else if (k === 'categories') go('categories', { type: 'expense' });
     else if (k === 'recurring') go('recurring');
+    else if (k === 'loans') go('loans', { dir: 'lent', showPaid: false });
     else go('settings');
   });
 }
@@ -1296,6 +1415,239 @@ function openTxSheet({ type = 'expense', tx = null, catId = null, rec = null } =
   if (!editing) amt.focus(); // synchronous, so iOS opens the keypad
 }
 
+/* ─────────── Money owed: add / edit form ─────────── */
+function openLoanForm({ loan = null, dir = 'lent' } = {}) {
+  const editing = !!loan;
+  const d = {
+    dir: loan?.dir || dir,
+    amount: loan ? fmtAmt(loan.amount) : '',
+    person: loan?.person || '',
+    date: loan?.date || todayKey(),
+    due: loan?.due || null,
+    note: loan?.note || '',
+  };
+  const start = JSON.stringify(d);
+  const paid = loan ? loanPaid(loan) : 0;
+  const names = [...new Set(state.loans.map((l) => l.person.trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
+  const o = openOverlay('sheet', `
+    <div class="sheet-top">
+      <div class="grab-zone"><div class="grabber"></div></div>
+      <div class="sheet-head"><h2 class="sheet-title"></h2>
+        <button class="icon-btn ghost sheet-close" data-act="close" aria-label="Close">${ic('close')}</button></div>
+    </div>
+    <div class="seg full loan-dir" role="radiogroup" aria-label="Who owes whom" style="margin-bottom:14px">
+      <button data-dir="lent" role="radio">They owe me</button><button data-dir="borrowed" role="radio">I owe them</button></div>
+    <label class="amount-box"><span class="cur">${esc(state.currency)}</span>
+      <input class="amt num" type="text" inputmode="decimal" placeholder="0.00" value="${esc(d.amount)}" autocomplete="off" enterkeyhint="next" aria-label="Amount"></label>
+    <div class="note-box">${ic('person')}<input class="person-in" list="loan-people" placeholder="Who? e.g. Sam" maxlength="40" value="${esc(d.person)}" autocomplete="off" autocapitalize="words" enterkeyhint="next" aria-label="Person"></div>
+    <datalist id="loan-people">${names.map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
+    <div class="date-row">
+      <label class="date-chip lent-chip">${ic('calendar_today')}<span class="dl"></span>
+        <input type="date" class="date-input lent-date" value="${d.date}" aria-label="Date"></label>
+      <span class="due-wrap">
+        <label class="date-chip due-chip">${ic('event')}<span class="due-l"></span>
+          <input type="date" class="date-input due-date" value="${d.due || ''}" aria-label="Due date (optional)"></label>
+        <button class="icon-btn ghost due-clear" data-act="clear-due" aria-label="Remove due date">${ic('close')}</button>
+      </span>
+    </div>
+    <div class="note-box">${ic('notes')}<input class="note-in" placeholder="What for? (optional)" maxlength="80" value="${esc(d.note)}" enterkeyhint="done" aria-label="Note"></div>
+    <div class="field-error loan-err"></div>
+    <button class="btn block accent" data-act="save"></button>`,
+  { isDirty: () => JSON.stringify(d) !== start });
+  const p = o.panel;
+  enableSheetDrag(o);
+  const saveBtn = $('[data-act=save]', p);
+  const err = $('.loan-err', p);
+
+  const valid = () => parseAmount(d.amount) > 0 && d.person.trim() && parseAmount(d.amount) >= paid;
+  const paint = () => {
+    const lent = d.dir === 'lent';
+    $('.sheet-title', p).textContent = editing ? 'Edit' : lent ? 'Money I lent' : 'Money I borrowed';
+    p.querySelectorAll('[data-dir]').forEach((b) => { b.classList.toggle('on', b.dataset.dir === d.dir); b.setAttribute('aria-checked', String(b.dataset.dir === d.dir)); });
+    $('.person-in', p).placeholder = lent ? 'Who borrowed it? e.g. Sam' : 'Who lent it to you? e.g. Sam';
+    $('.dl', p).textContent = `${lent ? 'Lent' : 'Borrowed'} ${d.date === todayKey() ? 'today' : dayMonth(d.date)}`;
+    $('.due-l', p).textContent = d.due ? `Due ${dayMonth(d.due)}` : 'Add due date';
+    $('.due-chip', p).classList.toggle('set', !!d.due);
+    $('.due-clear', p).hidden = !d.due;
+    const a = parseAmount(d.amount);
+    saveBtn.disabled = !valid();
+    saveBtn.textContent = !(a > 0) ? 'Enter an amount' : !d.person.trim() ? 'Who was it?' : editing ? 'Save changes' : 'Save';
+    err.textContent = a > 0 && a < paid ? `${money(paid)} has already been paid back, so the amount can't be lower than that.` : '';
+  };
+  paint();
+
+  const amt = $('.amt', p);
+  amt.addEventListener('input', () => { const c = sanitizeAmount(amt.value); if (c !== amt.value) amt.value = c; d.amount = c; paint(); });
+  amt.addEventListener('keydown', (e) => { if (e.key === 'Enter') $('.person-in', p).focus(); });
+  $('.person-in', p).addEventListener('input', (e) => { d.person = e.target.value; paint(); });
+  $('.person-in', p).addEventListener('keydown', (e) => { if (e.key === 'Enter') e.target.blur(); });
+  $('.note-in', p).addEventListener('input', (e) => { d.note = e.target.value; });
+  $('.note-in', p).addEventListener('keydown', (e) => { if (e.key === 'Enter') { if (valid()) save(); else e.target.blur(); } });
+  for (const [sel, field] of [['.lent-date', 'date'], ['.due-date', 'due']]) {
+    const input = $(sel, p);
+    input.addEventListener('click', () => { try { input.showPicker(); } catch { /* ignore */ } });
+    input.addEventListener('change', () => { if (input.value || field === 'due') { d[field] = input.value || null; paint(); } });
+  }
+  p.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.dir) { d.dir = b.dataset.dir; paint(); }
+    if (b.dataset.act === 'close') o.requestClose();
+    if (b.dataset.act === 'clear-due') { d.due = null; $('.due-date', p).value = ''; paint(); }
+  });
+
+  function save() {
+    if (!valid()) return;
+    const fields = { dir: d.dir, amount: parseAmount(d.amount), person: d.person.trim(), date: d.date, due: d.due, note: d.note.trim() };
+    if (editing) {
+      Object.assign(loan, fields);
+      if (loanLeft(loan) <= 0 && !loan.settled) { loan.settled = todayKey(); loan.settledAuto = true; }
+      if (loanLeft(loan) > 0 && loan.settledAuto) { loan.settled = null; loan.settledAuto = false; }
+      persist(); o.close(); render(); toast('Changes saved');
+      return;
+    }
+    const l = { id: uid(), ...fields, repaid: [], settled: null, createdAt: Date.now() };
+    state.loans.push(l);
+    persist(); o.close();
+    if (top().name === 'loans') top().dir = l.dir;
+    render();
+    toast(l.dir === 'lent' ? `Saved · ${l.person} owes you ${money(l.amount)}` : `Saved · you owe ${l.person} ${money(l.amount)}`, {
+      action: 'Undo', onAction: () => { state.loans = state.loans.filter((x) => x !== l); persist(); render(); },
+    });
+  }
+  saveBtn.addEventListener('click', save);
+  if (!editing) amt.focus();
+}
+
+/* ─────────── Money owed: details, repayments ─────────── */
+function openLoanDetail(l) {
+  const o = openOverlay('sheet', `
+    <div class="sheet-top">
+      <div class="grab-zone"><div class="grabber"></div></div>
+      <div class="sheet-head">
+        <div class="loan-head">${avatar(l.person, 'lg')}<div style="min-width:0"><h2 class="sheet-title">${esc(l.person)}</h2><div class="sub"></div></div></div>
+        <button class="icon-btn ghost sheet-close" data-act="close" aria-label="Close">${ic('close')}</button></div>
+    </div>
+    <div class="loan-body"></div>`);
+  const p = o.panel;
+  enableSheetDrag(o);
+  const body = $('.loan-body', p);
+
+  const paint = () => {
+    const left = loanLeft(l), paid = loanPaid(l), open = loanOpen(l), di = dueInfo(l), lent = l.dir === 'lent';
+    $('.loan-head .sub', p).textContent = `${lent ? 'Borrowed from you' : 'You borrowed'} · ${shortDay(l.date)}`;
+    const reps = [...l.repaid].sort((a, b) => b.date.localeCompare(a.date));
+    body.innerHTML = `
+      <div class="loan-big"><strong class="num">${money(open ? left : l.amount)}</strong>
+        <small>${!open ? 'paid back in full' : paid ? `left to pay of ${money(l.amount)}` : lent ? 'owed to you' : 'you owe'}</small></div>
+      <div class="bar loan-bar"><i style="width:${Math.min(100, (paid / l.amount) * 100).toFixed(1)}%;--c:var(--income)"></i></div>
+      ${di ? `<div class="due-line ${di.cls}">${ic('event')}${di.text}</div>` : ''}
+      ${!open && l.settled ? `<div class="due-line done">${ic('check_circle')}Settled on ${shortDay(l.settled)}${left > 0 ? ` · ${money(left)} written off` : ''}</div>` : ''}
+      ${l.note ? `<div class="loan-note">${ic('notes')}<span>${esc(l.note)}</span></div>` : ''}
+      ${reps.length ? `<div class="field-label">Paid back so far · ${money(paid)}</div>
+        <div class="rep-list">${reps.map((r) => `<div class="rep-row"><span>${shortDay(r.date)}</span><span class="num">${money(r.amount)}</span>
+          <button class="icon-btn ghost" data-act="del-rep" data-id="${r.id}" aria-label="Remove this repayment">${ic('close')}</button></div>`).join('')}</div>` : ''}
+      <div class="loan-actions">
+        ${open ? `<button class="btn block ${lent ? 'accent' : 'ink'}" data-act="repay">${ic('add')}${lent ? 'They paid some back' : 'I paid some back'}</button>
+          <button class="btn block soft" data-act="settle">${ic('check_circle')}${lent ? 'Mark as fully paid back' : 'Mark as fully paid off'}</button>`
+        : left > 0 ? `<button class="btn block soft" data-act="reopen">${ic('restart_alt')}Reopen</button>` : ''}
+      </div>
+      <div class="sheet-actions"><button class="text-btn" data-act="edit">${ic('edit')}Edit</button>
+        <button class="text-btn danger" data-act="delete">${ic('delete')}Delete</button></div>`;
+  };
+  paint();
+  const refresh = () => { paint(); render(); };
+
+  p.addEventListener('click', async (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const act = b.dataset.act;
+    if (act === 'close') o.close();
+    if (act === 'repay') openRepayDialog(l, refresh);
+    if (act === 'settle') {
+      const before = { settled: l.settled, settledAuto: l.settledAuto };
+      l.settled = todayKey(); l.settledAuto = false;
+      persist(); refresh();
+      toast(`${l.person} ${l.dir === 'lent' ? 'has paid you back' : 'is paid off'}`, {
+        action: 'Undo', onAction: () => { Object.assign(l, before); persist(); refresh(); },
+      });
+    }
+    if (act === 'reopen') { l.settled = null; l.settledAuto = false; persist(); refresh(); }
+    if (act === 'del-rep') {
+      const r = l.repaid.find((x) => x.id === b.dataset.id);
+      if (!r) return;
+      l.repaid = l.repaid.filter((x) => x !== r);
+      if (l.settledAuto && loanLeft(l) > 0) { l.settled = null; l.settledAuto = false; }
+      persist(); refresh();
+      toast(`Removed ${money(r.amount)} repayment`, {
+        action: 'Undo', onAction: () => {
+          l.repaid.push(r);
+          if (loanLeft(l) <= 0 && !l.settled) { l.settled = r.date; l.settledAuto = true; }
+          persist(); refresh();
+        },
+      });
+    }
+    if (act === 'edit') { o.close(); openLoanForm({ loan: l }); }
+    if (act === 'delete') {
+      const ok = await confirmDialog({
+        title: `Delete this ${money(l.amount)} with ${l.person}?`,
+        message: 'It will be removed from Money owed, along with its repayments.',
+        confirm: 'Delete', danger: true,
+      });
+      if (!ok) return;
+      state.loans = state.loans.filter((x) => x !== l);
+      persist(); o.close(); render();
+      toast('Deleted', { action: 'Undo', onAction: () => { state.loans.push(l); persist(); render(); } });
+    }
+  });
+}
+
+function openRepayDialog(l, done) {
+  const left = loanLeft(l);
+  const d = { amount: fmtAmt(left), date: todayKey() };
+  const lent = l.dir === 'lent';
+  const o = openOverlay('dialog', `
+    <div class="dlg-head">${avatar(l.person, 'lg')}
+      <div><h2>${lent ? 'Money paid back' : 'You paid back'}</h2><div class="sub">${lent ? `From ${esc(l.person)}` : `To ${esc(l.person)}`} · ${money(left)} left</div></div></div>
+    <label class="amount-box"><span class="cur">${esc(state.currency)}</span>
+      <input class="amt num" type="text" inputmode="decimal" value="${esc(d.amount)}" autocomplete="off" enterkeyhint="done" aria-label="Amount paid back"></label>
+    <div class="presets" style="margin:12px 0 0">
+      <button data-fill="${fmtAmt(left)}">All ${money(left)}</button>
+      ${left >= 2 ? `<button data-fill="${fmtAmt(round2(left / 2))}">Half ${money(round2(left / 2))}</button>` : ''}
+    </div>
+    <label class="date-chip" style="margin-top:6px">${ic('calendar_today')}<span class="dl"></span>${ic('expand_more')}
+      <input type="date" class="date-input" value="${d.date}" aria-label="Date paid back"></label>
+    <div class="field-error"></div>
+    <div class="dlg-actions"><button class="text-btn" data-act="cancel">Cancel</button>
+      <button class="text-btn accent" data-act="save">Save</button></div>`);
+  const p = o.panel;
+  const amt = $('.amt', p), err = $('.field-error', p), dateIn = $('.date-input', p);
+  const paintDate = () => { $('.dl', p).textContent = d.date === todayKey() ? 'Today' : shortDay(d.date); };
+  paintDate();
+  amt.addEventListener('input', () => { const c = sanitizeAmount(amt.value); if (c !== amt.value) amt.value = c; d.amount = c; err.textContent = ''; });
+  amt.addEventListener('keydown', (e) => { if (e.key === 'Enter') save(); });
+  dateIn.addEventListener('click', () => { try { dateIn.showPicker(); } catch { /* ignore */ } });
+  dateIn.addEventListener('change', () => { if (dateIn.value) { d.date = dateIn.value; paintDate(); } });
+  p.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.fill) { d.amount = b.dataset.fill; amt.value = d.amount; err.textContent = ''; }
+    if (b.dataset.act === 'cancel') o.close();
+    if (b.dataset.act === 'save') save();
+  });
+  function save() {
+    const a = parseAmount(d.amount);
+    if (!(a > 0)) { err.textContent = 'Enter how much was paid back'; return; }
+    if (a > left) { err.textContent = `Only ${money(left)} is left to pay`; return; }
+    l.repaid.push({ id: uid(), amount: a, date: d.date });
+    const nowLeft = loanLeft(l);
+    if (nowLeft <= 0) { l.settled = d.date; l.settledAuto = true; }
+    persist(); o.close(); done();
+    toast(nowLeft <= 0 ? `All paid back${lent ? ` by ${l.person}` : ''}` : `${money(a)} recorded · ${money(nowLeft)} left`);
+  }
+}
+
 /* ─────────── New / edit category dialog ─────────── */
 function openCatDialog({ cat = null, type = 'expense', onSaved } = {}) {
   const editing = !!cat;
@@ -1541,6 +1893,7 @@ function refreshForNow() {
   }
   if ((added.length || newDay) && !overlays.length) render();
   announceAdded(added);
+  if (newDay) setTimeout(remindDue, added.length ? 5200 : 300);
 }
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshForNow(); });
 // Covers the app being left open on screen past midnight.
@@ -1551,6 +1904,7 @@ applyTheme();
 const bootAdded = postRecurring();
 render();
 announceAdded(bootAdded);
+setTimeout(remindDue, bootAdded.length ? 5200 : 800);
 navigator.storage?.persist?.().catch(() => {});
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});

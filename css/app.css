@@ -441,3 +441,56 @@ button.set-row:active { background: var(--surface-2); }
 .trend .grid.dash { stroke-dasharray: 3 4; }
 .trend .col.on text { fill: var(--text); font-weight: 700; }
 .trend .col.on .hit { fill: var(--surface-2); fill-opacity: .7; }
+
+/* ───────────── Money owed ───────────── */
+.avatar { width: 40px; height: 40px; border-radius: 50%; flex: none; display: grid; place-items: center; background: color-mix(in srgb, var(--c) 18%, var(--surface)); color: var(--c); font-weight: 800; font-size: 15px; letter-spacing: .02em; }
+.avatar.lg { width: 48px; height: 48px; font-size: 18px; }
+.amt-col { display: flex; flex-direction: column; align-items: flex-end; flex: none; }
+.amt-col .of { font-size: 12px; color: var(--text-2); margin-top: 1px; }
+.due { font-weight: 600; }
+.due.soon { color: var(--expense); }
+.due.overdue { color: var(--danger); }
+
+.owed-card { display: flex; align-items: center; gap: 14px; width: 100%; margin-top: 12px; padding: 14px 14px 14px 16px; text-align: left; }
+.owed-card:active { background: var(--surface-2); }
+.owed-card .chip { width: 40px; height: 40px; }
+.owed-card .main { flex: 1; min-width: 0; }
+.owed-card .title { display: block; font-weight: 700; font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.owed-card .sub { display: block; font-size: 13px; color: var(--text-2); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.owed-card .chev { color: var(--text-3); width: 20px; height: 20px; }
+
+.loan-head { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.loan-head .sheet-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.loan-head .sub { font-size: 13px; color: var(--text-2); margin-top: 1px; }
+.loan-big { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 10px 0 10px; }
+.loan-big strong { font-size: 36px; font-weight: 800; letter-spacing: -.02em; }
+.loan-big small { font-size: 14px; color: var(--text-2); }
+.loan-bar { height: 8px; margin: 0 0 14px; }
+.due-line { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); margin-bottom: 10px; color: var(--text-2); }
+.due-line .ic { width: 18px; height: 18px; }
+.due-line.soon { color: var(--expense); background: var(--accent-soft); }
+.due-line.overdue { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, var(--surface)); }
+.due-line.done { color: var(--income); background: color-mix(in srgb, var(--income) 14%, var(--surface)); }
+.loan-note { display: flex; gap: 8px; font-size: 14px; color: var(--text-2); margin-bottom: 10px; padding: 0 2px; }
+.loan-note .ic { width: 18px; height: 18px; flex: none; margin-top: 1px; }
+.rep-list { background: var(--raised); border: 1.5px solid var(--border); border-radius: 16px; padding: 4px 4px 4px 14px; margin-bottom: 14px; }
+.rep-row { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.rep-row span:first-child { flex: 1; color: var(--text-2); }
+.rep-row span.num { font-weight: 700; color: var(--income); }
+.rep-row .icon-btn { width: 36px; height: 36px; color: var(--text-3); }
+.rep-row .icon-btn .ic { width: 18px; height: 18px; }
+.rep-row + .rep-row { border-top: 1px solid var(--border); }
+.loan-actions { display: grid; gap: 10px; margin-top: 6px; }
+
+.date-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; }
+.due-wrap { display: inline-flex; align-items: center; }
+.due-chip { margin-left: 0; }
+.due-chip.set { color: var(--accent); background: var(--accent-soft); }
+.due-clear { width: 34px; height: 34px; color: var(--text-3); }
+.due-clear .ic { width: 18px; height: 18px; }
+.due-clear[hidden] { display: none; }
+.loan-dir button.on[data-dir=lent] { color: var(--income); }
+.loan-dir button.on[data-dir=borrowed] { color: var(--expense); }
+/* While a panel is open, show messages at the top so they don't cover its buttons */
+body.locked #toast { bottom: auto; top: calc(var(--vvtop) + var(--safe-top) + 12px); transform: translate(-50%, -12px); }
+body.locked #toast.show { transform: translate(-50%, 0); }
