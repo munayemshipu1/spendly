@@ -1,5 +1,6 @@
 import { ICONS } from './icons.js';
 import * as S from './store.js';
+import { loadJsPDF, buildReport } from './report.js';
 import {
   todayKey, addDays, monthName, monthShort, monthLabel, shortDay, dayLabel, dayMonth,
   PERIODS, periodOf, periodRange, periodStep, weekLabel, rangeLabel, customKey, daysBetween,
@@ -347,6 +348,7 @@ const VIEWS = {
         <button class="icon-btn raised" data-action="day" data-n="1" aria-label="Next day">${ic('chevron_right')}</button>
       </div>
 
+      ${reportCard()}
       <div class="period-bar">${seg(periodTabs(), period, 'home-period', 'full')}</div>
 
       <div class="section-row"><span class="section-label">${periodTitle(period, key)} overview</span>
@@ -421,7 +423,7 @@ const VIEWS = {
     const trendTitle = { week: '6-week trend', month: '6-month trend', year: '6-year trend', all: '6-year trend', custom: '6-month trend' }[period];
 
     const html = `
-      ${appbar('Statistics')}
+      ${appbar('Statistics', `<button class="icon-btn ghost" data-action="stats-report" aria-label="PDF report">${ic('picture_as_pdf')}</button>`)}
       <div class="period-bar top">${seg(periodTabs(), period, 'stats-period', 'full')}</div>
       <section class="card">
         ${tabs([['expense', 'Expenses'], ['income', 'Income']], type, 'stats-type')}
@@ -440,6 +442,8 @@ const VIEWS = {
           <div class="legend"><span><i class="dot income"></i>Income</span><span><i class="dot expense"></i>Expense</span></div></div>
         ${trendChart(bp, period === 'all' ? nowKey : period === 'custom' ? periodOf('month', key.slice(11)) : key, per, fixed ? null : key)}
       </section>
+
+      <button class="btn soft block" style="margin-top:12px" data-action="stats-report">${ic('picture_as_pdf')}PDF report · ${esc(reportLabel(period, key))}</button>
 
       <div class="section-row"><span class="section-label">${listTitle}</span></div>
       ${keys.map((k) => {
@@ -598,6 +602,16 @@ const VIEWS = {
 
       <div class="section-row"><span class="section-label">Appearance</span></div>
       <div class="card"><div class="set-seg" style="padding-top:14px">${seg([['system', 'System'], ['light', 'Light'], ['dark', 'Dark']], state.theme, 'set-theme')}</div></div>
+
+      <div class="section-row"><span class="section-label">Reports</span></div>
+      <div class="card"><div class="set-group">
+        <label class="set-row set-toggle">${ic('picture_as_pdf')}<span class="main"><span class="title" style="display:block">Monthly PDF report</span>
+          <span class="sub" style="display:block">At the start of each month, get last month's report ready to share</span></span>
+          <input type="checkbox" role="switch" data-input="report-reminder" ${state.reportReminder !== false ? 'checked' : ''}><i class="switch" aria-hidden="true"></i></label>
+        <button class="set-row" data-action="report-month" data-key="${addMonths(monthOf(todayKey()), -1)}">${ic('file_download')}<span class="main"><span class="title" style="display:block">${monthLabel(addMonths(monthOf(todayKey()), -1))} report</span><span class="sub" style="display:block">Last month as a PDF</span></span></button>
+        <button class="set-row" data-action="report-month" data-key="${monthOf(todayKey())}">${ic('file_download')}<span class="main"><span class="title" style="display:block">${monthName(monthOf(todayKey()))} so far</span><span class="sub" style="display:block">This month up to today</span></span></button>
+        <button class="set-row" data-action="report-year">${ic('file_download')}<span class="main"><span class="title" style="display:block">${thisYear()} so far</span><span class="sub" style="display:block">This year up to today</span></span></button>
+      </div></div>
 
       <div class="section-row"><span class="section-label">Your data</span></div>
       <div class="card"><div class="set-group">
@@ -857,6 +871,14 @@ const actions = {
   'hist-filter': (el) => { top().filter = el.dataset.v; top().limit = 300; render(); },
   'hist-more': () => { top().limit += 300; $('#hist-results').innerHTML = historyResults(top()); },
   'cats-type': (el) => { top().type = el.dataset.v; render(); },
+  'month-report': (el) => openReport('month', el.dataset.key, { markSeen: el.dataset.key }),
+  'dismiss-report': (el) => {
+    state.reportSeen = el.dataset.key; persist(); render();
+    toast('You can create reports any time in Statistics or Settings');
+  },
+  'stats-report': () => openReport(top().period, top().key),
+  'report-month': (el) => openReport('month', el.dataset.key),
+  'report-year': () => openReport('year', thisYear()),
   'go-loans': (el) => go('loans', { dir: el.dataset.dir || 'lent', showPaid: false }),
   'loans-dir': (el) => { top().dir = el.dataset.v; render(); },
   'new-loan': (el) => openLoanForm({ dir: el.dataset.dir || 'lent' }),
@@ -918,6 +940,10 @@ viewEl.addEventListener('click', (e) => {
 viewEl.addEventListener('change', (e) => {
   const k = e.target.dataset.input;
   if (k === 'home-date' && e.target.value) { ui.date = e.target.value; render(); }
+  if (k === 'report-reminder') {
+    state.reportReminder = e.target.checked; persist();
+    toast(e.target.checked ? "You'll get a report at the start of each month" : 'Monthly report turned off');
+  }
   if (k === 'cur-custom') {
     const v = e.target.value.trim();
     if (v) { state.currency = v; persist(); render(); }
@@ -1782,9 +1808,119 @@ function openCatDialog({ cat = null, type = 'expense', onSaved } = {}) {
   if (!editing) nameIn.focus();
 }
 
+/* ═════════════ PDF reports ═════════════ */
+const REPORT_TITLES = { week: 'Weekly report', month: 'Monthly report', year: 'Yearly report', all: 'All-time report', custom: 'Report' };
+
+/** money() for the PDF: its built-in fonts can't draw ৳ ₹ ₦ (and € is safest spelled out). */
+function pdfMoney(n, { sign = false } = {}) {
+  const map = { '৳': 'Tk ', '₹': 'Rs ', '₦': 'NGN ', '€': 'EUR ' };
+  let c = map[state.currency] ?? state.currency;
+  if (/[^\x00-\xFF]/.test(c)) c = '';
+  const abs = Math.round(Math.abs(n) * 100) / 100;
+  const s = c + (/[A-Za-z.]$/.test(c) ? ' ' : '') + nf(Number.isInteger(abs) ? 0 : 2).format(abs);
+  return (sign ? (n < 0 ? '-' : '+') : n < 0 ? '-' : '') + s;
+}
+
+const reportLabel = (period, key) => (period === 'week' ? `Week of ${weekLabel(key)}` : period === 'all' ? 'All time' : periodName(period, key));
+
+function reportData(period, key) {
+  const list = inPeriod(period, key).sort((a, b) => a.date.localeCompare(b.date) || (a.createdAt || 0) - (b.createdAt || 0));
+  const T = totals(list);
+  let prev = null;
+  if (period !== 'all') {
+    const pk = periodStep(period, key, -1);
+    const pT = totals(inPeriod(period, pk));
+    const label = period === 'month' ? monthName(pk) : period === 'week' ? 'the week before' : period === 'year' ? pk
+      : `the previous ${daysBetween(...key.split('_')) + 1} days`;
+    prev = { label, income: pT.income, expense: pT.expense };
+  }
+  const rows = (type, total) => breakdown(list, type).map((e) => ({ name: e.cat.name, color: e.cat.color, value: e.value, count: e.count, pct: pct(e.value, total) }));
+  const active = state.recurring.filter((r) => !r.paused);
+  const L = owedTotals('lent'), B = owedTotals('borrowed');
+  const t = todayKey();
+  return {
+    title: REPORT_TITLES[period] || 'Report',
+    periodLabel: reportLabel(period, key),
+    generated: `${shortDay(t)}${t.slice(0, 4) === thisYear() ? ' ' + thisYear() : ''}`,
+    money: pdfMoney,
+    totals: T,
+    prev,
+    buckets: periodBuckets(period, key).map((g) => ({ label: g.label, income: g.income, expense: g.expense })),
+    spending: rows('expense', T.expense),
+    earning: rows('income', T.income),
+    top: list.filter((x) => x.type === 'expense').sort((a, b) => b.amount - a.amount).slice(0, 5)
+      .map((x) => ({ date: shortDay(x.date), name: catOf(x.catId).name, note: x.note, amount: x.amount })),
+    recurring: active.length ? {
+      count: active.length,
+      out: round2(active.filter((r) => r.type === 'expense').reduce((s, r) => s + r.amount, 0)),
+      in: round2(active.filter((r) => r.type === 'income').reduce((s, r) => s + r.amount, 0)),
+    } : null,
+    owed: L.count || B.count ? { toYou: L.total, youOwe: B.total, overdue: L.overdue + B.overdue } : null,
+    tx: list.map((x) => ({ date: shortDay(x.date), name: catOf(x.catId).name, note: x.note, type: x.type, amount: x.amount })),
+  };
+}
+
+/** Build the PDF, then offer Share/Save and Open (a second tap keeps iOS's share sheet happy). */
+async function openReport(period, key, { markSeen = null } = {}) {
+  const title = REPORT_TITLES[period] || 'Report';
+  const label = reportLabel(period, key);
+  if (markSeen) { state.reportSeen = markSeen; persist(); render(); }
+  const o = openOverlay('dialog', `
+    <div class="dlg-head"><span class="chip lg" style="--c:var(--accent)">${ic('picture_as_pdf')}</span>
+      <div><h2>${esc(title)}</h2><div class="sub">${esc(label)}</div></div></div>
+    <p class="report-status">Creating your PDF…</p>
+    <div class="report-actions" hidden>
+      <button class="btn block accent" data-act="share">${ic('ios_share')}Share or save PDF</button>
+      <button class="btn block soft" data-act="open">${ic('open_in_new')}Open PDF</button>
+    </div>
+    <div class="dlg-actions"><button class="text-btn" data-act="close">Close</button></div>`);
+  const p = o.panel;
+  const status = $('.report-status', p);
+  let blob = null;
+  const filename = `spendly-report-${key === 'all' ? 'all-time' : key}.pdf`;
+  p.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.act === 'close') o.close();
+    if (b.dataset.act === 'share' && blob) deliverFile(filename, blob, 'application/pdf');
+    if (b.dataset.act === 'open' && blob) {
+      const url = URL.createObjectURL(blob);
+      const w = window.open(url, '_blank');
+      if (!w) { const a = document.createElement('a'); a.href = url; a.target = '_blank'; a.rel = 'noopener'; document.body.append(a); a.click(); a.remove(); }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    }
+  });
+  try {
+    const JsPDF = await loadJsPDF();
+    const doc = buildReport(JsPDF, reportData(period, key));
+    blob = doc.output('blob');
+    const pages = doc.internal.getNumberOfPages();
+    status.textContent = `Ready · ${plural(pages, 'page', 'pages')} · ${Math.max(1, Math.round(blob.size / 1024))} KB. Share it to Mail, Files, WhatsApp and more.`;
+    $('.report-actions', p).hidden = false;
+  } catch (err) {
+    console.error(err);
+    status.textContent = err.message || 'Something went wrong creating the PDF.';
+    status.classList.add('neg');
+  }
+}
+
+/** Home card at the start of a month: last month's report is ready. */
+function reportCard() {
+  if (state.reportReminder === false) return '';
+  const pm = addMonths(monthOf(todayKey()), -1);
+  if (state.reportSeen && state.reportSeen >= pm) return '';
+  if (!state.tx.some((t) => t.date.startsWith(pm))) return '';
+  return `<div class="card report-card">
+    <span class="chip" style="--c:var(--accent)">${ic('picture_as_pdf')}</span>
+    <span class="main"><span class="title">Your ${monthName(pm)} report is ready</span><span class="sub">Income, spending and savings as a PDF</span></span>
+    <button class="btn accent pill" data-action="month-report" data-key="${pm}">Get PDF</button>
+    <button class="icon-btn ghost" data-action="dismiss-report" data-key="${pm}" aria-label="Dismiss">${ic('close')}</button>
+  </div>`;
+}
+
 /* ═════════════ Import / export ═════════════ */
-async function deliverFile(filename, text, mime) {
-  const blob = new Blob([text], { type: mime });
+async function deliverFile(filename, content, mime) {
+  const blob = new Blob([content], { type: mime });
   const file = new File([blob], filename, { type: mime });
   if (matchMedia('(pointer: coarse)').matches && navigator.canShare?.({ files: [file] })) {
     try { await navigator.share({ files: [file], title: filename }); return; }

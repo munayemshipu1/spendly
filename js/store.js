@@ -37,6 +37,8 @@ function defaults() {
     currency: '£',
     numberFormat: 'en-US',
     theme: 'system',
+    reportReminder: true, // offer last month's PDF report at the start of each month
+    reportSeen: null, // 'YYYY-MM' of the last month whose report was opened or dismissed
     categories: DEFAULT_CATEGORIES.map(([id, type, name, icon, color, emoji], i) => ({
       id: 'c_' + id, type, name, icon: icon || 'category', emoji: emoji || null, color, order: i,
     })),

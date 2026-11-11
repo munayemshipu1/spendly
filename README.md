@@ -21,6 +21,9 @@ and keeps all data on the device. No accounts, no server, no build step.
 - **Money owed:** keep track of money you lent (or borrowed) — who, how much, due date, partial repayments.
   Overdue items are highlighted, the home screen shows what you're owed, and you get a reminder once a day.
 - **Categories:** your own names, icons or emoji, and colours. Drag to reorder.
+- **PDF reports:** at the start of each month Spendly offers last month's report (income, spending, savings,
+  comparison, chart, categories, biggest expenses, every transaction) ready to share to Mail, Files, WhatsApp, etc.
+  Reports for any period are available from Statistics and Settings. Made on the device; nothing is uploaded.
 - **Search** all transactions; **export** to CSV; **back up / restore** to a JSON file.
 - £ by default, with other currency symbols available, plus light, dark or system theme.
 
@@ -58,5 +61,6 @@ After changing any file, bump `VERSION` in `sw.js` so installed copies download 
 | `js/store.js` | Saving to localStorage, default categories, sample data, backup checks |
 | `js/util.js` | Date, period and amount helpers |
 | `js/icons.js` | Material Design icons (Apache 2.0) |
+| `js/report.js`, `vendor/jspdf.umd.min.js` | PDF reports, built with [jsPDF](https://github.com/parallax/jsPDF) 2.5.1 (MIT) |
 | `sw.js`, `manifest.webmanifest`, `icons/` | Offline support and install metadata |
 | `tools/` | Local server and app icon generator (`node tools/make-icons.js`) |
